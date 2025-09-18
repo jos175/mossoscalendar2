@@ -309,15 +309,29 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase global variables (provided by the environment)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // IMPORTANTE: AQUI DEBES PEGAR TUS CLAVES DE FIREBASE.
+        // Reemplaza los valores con los que copiaste del Paso 1.
+        const firebaseConfig = {
+             apiKey: "AIzaSyCfwMOIDxQhFRkuMupsbSzGf5UKuRqe1aA",
 
-        // Initialize Firebase
+  authDomain: "mossoscalendar.firebaseapp.com",
+
+  projectId: "mossoscalendar",
+
+  storageBucket: "mossoscalendar.firebasestorage.app",
+
+  messagingSenderId: "357620337746",
+
+  appId: "1:357620337746:web:46a8f42ad9c6fdafe3e38b",
+
+  measurementId: "G-B15S9RY6B9"
+        };
+        const appId = "mossos_calendar_by_jpl"; // Puedes dejar este valor
+        
+        // Inicializar Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
@@ -356,6 +370,8 @@
         let selectedDayDate = null;
         let currentAnnotationType = null;
         let annotations = {};
+        let isAuthReady = false;
+        let userId = null;
 
         const months = ["Gener", "Febrer", "Març", "Abril", "Maig", "Juny", "Juliol", "Agost", "Setembre", "Octubre", "Novembre", "Desembre"];
 
@@ -396,7 +412,7 @@
 
         const ESCAMOT_BASE_WEEK = {
             1: 3,
-            2: 3, 
+            2: 3,
             3: 1,
             4: 5,
             5: 4,
@@ -429,18 +445,18 @@
         function weekIndexForDate(date, escamot) {
             const days = diffDays(date, ANCHOR_MONDAY);
             const offsetWeeks = Math.floor(days / 7);
-            const base = ESCAMOT_BASE_WEEK[escamot] || 1; 
+            const base = ESCAMOT_BASE_WEEK[escamot] || 1;
             const idx = ((base - 1 + offsetWeeks) % 5 + 5) % 5;
             return idx + 1;
         }
 
         function getQ5Shift(date, escamot) {
             const weekIdx = weekIndexForDate(date, escamot);
-            const day = date.getDay(); 
+            const day = date.getDay();
             const isWeekend = day === 0 || day === 6;
 
             switch (weekIdx) {
-                case 1: 
+                case 1:
                 case 4:
                     return 'Festa';
                 case 2:
@@ -743,38 +759,44 @@
             }
         });
 
-        // Save hours
+        clearAnnotationBtn.addEventListener('click', () => {
+            deleteAnnotation(selectedDayDate);
+            annotationModal.classList.add('hidden');
+        });
+
+        closeModalBtn.addEventListener('click', () => {
+            annotationModal.classList.add('hidden');
+        });
+        
         saveTimeBtn.addEventListener('click', () => {
             const hours = parseInt(timeHoursInput.value) || 0;
             const minutes = parseInt(timeMinutesInput.value) || 0;
             const motivo = timeMotivoInput.value.trim();
-            
-            if (selectedDayDate) {
-                saveAnnotation(selectedDayDate, { type: currentAnnotationType, hours, minutes, motivo });
+
+            if (hours === 0 && minutes === 0) {
+                deleteAnnotation(selectedDayDate);
+            } else {
+                saveAnnotation(selectedDayDate, {
+                    type: currentAnnotationType,
+                    hours: hours,
+                    minutes: minutes,
+                    motivo: motivo
+                });
             }
             timeModal.classList.add('hidden');
         });
 
-        // Cancel
         cancelTimeBtn.addEventListener('click', () => {
             timeModal.classList.add('hidden');
-            annotationModal.classList.remove('hidden');
         });
 
-        // Clear annotation
-        clearAnnotationBtn.addEventListener('click', () => {
-            if (selectedDayDate && annotations[selectedDayDate]) {
-                deleteAnnotation(selectedDayDate);
-                annotationModal.classList.add('hidden');
-            }
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            populateMonthYearSelects();
+            goToToday();
         });
 
-        // Close modal
-        closeModalBtn.addEventListener('click', () => {
-            annotationModal.classList.add('hidden');
-        });
-
-        // Event listeners for UI updates
+        // Event listeners for UI controls
         escamotSelect.addEventListener('change', renderCalendar);
         monthSelect.addEventListener('change', renderCalendar);
         yearSelect.addEventListener('change', renderCalendar);
@@ -782,51 +804,29 @@
         nextMonthBtn.addEventListener('click', () => updateMonth(1));
         todayBtn.addEventListener('click', goToToday);
 
-        // ** CORRECTED FIREBASE INITIALIZATION **
-        const initFirebase = async () => {
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    // User is signed in. Now we can get the user ID and start listening for data.
-                    let userId = user.uid;
-                    let isAuthReady = true;
-                    userIdDisplay.textContent = `ID de Usuario: ${userId}`;
-                    statusMessage.textContent = "Conectado. Tus anotaciones se guardan automáticamente.";
-                    
-                    const userAnnotationsRef = collection(db, `/artifacts/${appId}/users/${userId}/annotations`);
-                    onSnapshot(userAnnotationsRef, (querySnapshot) => {
-                        const newAnnotations = {};
-                        querySnapshot.forEach((doc) => {
-                            newAnnotations[doc.id] = doc.data();
-                        });
-                        annotations = newAnnotations;
-                        renderCalendar();
-                    });
+        // Firebase Auth listener
+        // El usuario se autentica de forma anónima para tener un ID único
+        signInAnonymously(auth).then((result) => {
+            userId = result.user.uid;
+            userIdDisplay.textContent = `ID de Usuario: ${userId}`;
+            statusMessage.textContent = "Conectado. Anotaciones guardadas en tu cuenta.";
+            isAuthReady = true;
 
-                } else {
-                    // User is signed out. This might be the initial state.
-                    userIdDisplay.textContent = "ID de Usuario: Cargando...";
-                    statusMessage.textContent = "Conectando...";
-                }
+            // Escuchar cambios en la base de datos en tiempo real para este usuario
+            onSnapshot(collection(db, `/artifacts/${appId}/users/${userId}/annotations`), (snapshot) => {
+                annotations = {};
+                snapshot.forEach((doc) => {
+                    annotations[doc.id] = doc.data();
+                });
+                renderCalendar();
+            }, (error) => {
+                console.error("Error fetching data from Firestore: ", error);
+                statusMessage.textContent = "Error al conectar con la base de datos.";
             });
 
-            // Attempt to sign in. The listener above will handle the result.
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Error durante el inicio de sesión inicial:", error);
-                statusMessage.textContent = "Error al conectar. Por favor, intenta de nuevo más tarde.";
-            }
-        };
-
-        // Call the initialization function when the page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            populateMonthYearSelects();
-            goToToday();
-            initFirebase();
+        }).catch((error) => {
+            console.error("Authentication error: ", error);
+            statusMessage.textContent = "Error de autenticación.";
         });
     </script>
 </body>
